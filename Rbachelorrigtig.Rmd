@@ -1,0 +1,1157 @@
+---
+title: \textcolor{BrickRed}{\textbf{Examining the movement of Greenland sharks with
+  hidden Markov models using diurnal and seasonal effects}}
+author: | 
+  | Bachelor's Thesis in Applied Statistics 
+  |
+  | Youssef Raad
+  |
+  |
+  | Supervised by:
+  | Susanne Ditlevsen
+  |
+  | 
+  | University of Copenhagen
+  | zfw568@alumni.ku.dk
+  | zfw568
+date: "09-06-2023"
+output:
+  pdf_document:
+    extra_dependencies: float
+    fig_caption: yes
+    number_sections: yes
+    latex_engine: pdflatex
+  html_document:
+    df_print: paged
+  word_document: default
+bibliography: C:/Users/youss/OneDrive/Skrivebord/references.bib
+link-citations: yes
+csl: "https://raw.githubusercontent.com/citation-style-language/styles/master/apa.csl"
+fontsize: 12pt
+header-includes:
+- \PassOptionsToPackage{dvipsnames}{xcolor}
+- \usepackage{xcolor}
+- \definecolor{BrickRed}{HTML}{B22222}
+- \usepackage{tikz}
+- "\\usepackage{tikz-cd}"
+- \usepackage{pgfplots}
+- \usepackage[margin=1in]{geometry}
+- \usepackage{bm}
+- \usetikzlibrary{arrows.meta}
+- \usepackage{titling}
+- "\\pretitle{\\begin{center} \\includegraphics[width=2in,height=2in]{Ku-ucph-logo-svg.svg.png}\\LARGE\\\\}"
+- \posttitle{\par\vspace{1.0em}\end{center}}
+- \usepackage{fancyhdr}
+- \pagestyle{fancy}
+- \fancyhf{}
+- \lhead{\textit{Youssef M. Raad}}
+- \renewcommand{\headrulewidth}{1pt}
+- \cfoot{\thepage}
+- \newcommand{\beginsupplement}{\setcounter{table}{0}  \renewcommand{\thetable}{S\arabic{table}}
+  \setcounter{figure}{0} \renewcommand{\thefigure}{S\arabic{figure}}}
+- \usepackage{float}
+- \floatplacement{figure}{H}
+---
+
+
+```{r setup, include=FALSE, echo=FALSE}
+knitr::opts_chunk$set(warning = FALSE, echo = FALSE)
+knitr::opts_chunk$set(fig.align='center')
+options(tikzDefaultEngine = "xelatex")      
+library(imager)
+library(tidyverse)
+library(ggplot2)
+library(gridExtra)
+library(lubridate)
+library(momentuHMM)
+library(expm)
+library(MASS)
+library(clock)
+library(qdapRegex)
+library(mixR)
+library(car)
+library(kableExtra)
+library(pbs)
+theme_set(theme_bw())
+```
+\pagebreak
+\begin{center}
+\textbf{Abstract}
+\end{center}
+In this thesis we explore the movement patterns of the somniosus microcephalus or better known as the Greenland shark. A species that holds great significance in the Arctic Seas, it undergoes gradual growth and attains a remarkable length exceeding 500 centimeters (cm), indicating a lifespan far surpassing that of other vertebrates. However, little is known about the movement of the creature. In this thesis the movement patterns of 3 sharks (numbered 6, 17 and 30) were explored in a frequentist frame work with respect to seasonal and diurnal changes using hidden Markov models. We incorporated time of day and time of year using a periodic spline and tested both 2 and 3 state models. The 3 state time of year model was the best preforming model for each shark but the 3 state model showed tendencies of overfitting for two of the sharks with shark 30 models not converging. During the transition from summer to fall, we observed a drastic and simultaneous change in the behavior of the sharks. Prior to this seasonal period, both sharks generally favored intermediate to deeper water levels. However, from the beginning to the middle of fall, their preferences shifted towards shallower to intermediate water depths. Furthermore, as fall progresses towards its conclusion, we observed a drastic willingness for shark 6 to stay in deep waters.
+
+**Keywords**: Hidden Markov model, Greenland sharks, Time of Day (TOD), Time of Year (TOY), Stationary probability distribution, state-dependent distribution, Viterbi, Depth, Forward algorithm, likelihood.
+
+\pagebreak
+\tableofcontents
+
+\newpage
+# **Introduction**
+The Greenland shark, known as Somniosus microcephalus, is a remarkable creature found in the Arctic Seas. It exhibits slow growth and can reach lengths exceeding 500 centimeters (cm), indicating a lifespan that surpasses that of most other vertebrates [@nielsen2016eye]. Even though the Greenland shark sparked a lot of interest in both academia and the general public because of the remarkable estimated age of $392\pm120$ years [@nielsen2016eye], very little is actually known about the shark and its foraging behavior. It is still a unknown fact if it is a scavenger or a predator. The goal of this thesis is to examine the depth movements of the Greenland shark. The examination will be done by analyzing the depth measurements of the 3 sharks provided by Julius Nielsen, Ph.D. The employed statistical model will be the hidden Markov model. The hidden Markov model has gained a lot of traction in the analysis of animal movement in later years [@mcclintock2021momentuhmm, p. 2]. Hidden Markov models especially popular for telemetry data because of the speed of the computation and easy to implement data streams. However, the usage of statistical models in the analysis of the Greenland sharks has been very limited and almost exclusively descriptive.
+
+We will employ the hidden Markov model to the depth data and add different data streams. For seasonal and diurnal effects the implementation was carried out using a periodic spline for time of day (TOD) with boundary knots in 0 and 24 to check for diurnal patterns. The same approach was used for the time of year TOY but with boundary knots in 1 and 13 to check for monthly patterns.
+
+The thesis will shed light on the fundamentals of a Markov chain, a hidden Markov chain and how the likelihood is computed for a hidden Markov model. Subsequently, we proceed to the statistical methodology and model building where the essentials for the model fitting will be addressed. Afterwards we shortly touching upon the data given to us and some characteristics of each shark. Lastly we finish with the model selection and presentation using a variety of plots made from the thesis' theory and a discussion where both the underlying statistics, methods, problem areas and some auxiliary biology will be discussed in terms of the results.
+
+```{r message=FALSE, warning=FALSE}
+library(imager)
+library(tidyverse)
+library(ggplot2)
+library(gridExtra)
+library(lubridate)
+library(momentuHMM)
+library(expm)
+library(MASS)
+library(clock)
+library(qdapRegex)
+library(mixR)
+library(car)
+library(kableExtra)
+library(pbs)
+theme_set(theme_bw())
+```
+
+
+```{r, echo = FALSE, results = 'hide', message=FALSE}
+Sys.setlocale("LC_TIME", "Danish_Denmark.utf8")
+# Read the CSV file into R
+file6.2path <- "C:\\Users\\youss\\OneDrive\\Skrivebord\\Shark6-tag2-131976-Series.csv"
+data6.2 <- read.csv2(file6.2path, header = TRUE)
+
+file6.3path <- "C:\\Users\\youss\\OneDrive\\Skrivebord\\Shark6-tag3-138258 test.csv"
+data6.3 <- read.csv2(file6.3path, header = TRUE)
+
+data6 <- read.csv2(file6.3path, header = TRUE)
+
+# Create a variable that includes both the date and time information
+time_and_date6 <- paste(data6$Day, data6$Time)
+# Transform the ariable that includes both the date and time information
+Ttime6 <- as.POSIXct(strptime(time_and_date6, format = "%d-%b-%y %H:%M:%S"))
+# Create a data frame with the transformed time and depth
+
+df6 <- data.frame(
+  time = Ttime6,
+  Depth = data6$Depth,
+  Temperature = data6$Temperature
+)
+```
+
+
+
+```{r, echo = FALSE, results = 'hide', message=FALSE}
+Sys.setlocale("LC_TIME", "English_United States.utf8")
+file17_path <- "C:\\Users\\youss\\OneDrive\\Skrivebord\\Shark17-tag1-158793-Series (1).csv"
+data17 <- read.csv(file17_path)
+
+# Create a variable that includes both the date and time information
+time_and_date17 <- paste(data17$Day, data17$Time)
+# Transform the variable that includes both the date and time information
+Ttime17 <- as.POSIXct(time_and_date17, format = "%d-%b-%Y %H:%M:%S")
+# Create a data frame with the transformed time and depth
+df17 <- data.frame(
+  time = Ttime17,
+  Depth = data17$Depth,
+  Temperature = data17$Temperature
+)
+```
+
+
+```{r, echo = FALSE, results = 'hide', message=FALSE}
+file30_path <- "C:\\Users\\youss\\OneDrive\\Skrivebord\\Shark30-100982-Series.csv"
+data30 <- read.csv(file30_path)
+# Create a variable that includes both the date and time information
+time_and_date30 <- paste(data30$Day, data30$Time)
+# Transform the ariable that includes both the date and time information
+Ttime30 <- as.POSIXct(strptime(time_and_date30, format = "%d-%b-%y %H:%M:%S"))
+# Create a data frame with the transformed time and depth
+df30 <- data.frame(
+  time = Ttime30,
+  Depth = data30$Depth,
+  Temperature = data30$Temperature
+)
+```
+
+
+
+
+```{r, echo = FALSE, results = 'hide', message=FALSE}
+#time of day calculation. The number should range smoothly from 0 : ~23.99999. If it's anything other than that then it's not calculated right. 
+df30$TOD <- as.numeric(format(df30$time, format = "%H")) + as.numeric(format(df30$time, format = "%M")) / 60 + as.numeric(format(df30$time, format = "%S")) / 60 / 60
+
+df17$TOD <- as.numeric(format(df17$time, format = "%H")) + as.numeric(format(df17$time, format = "%M")) / 60 + as.numeric(format(df17$time, format = "%S")) / 60 / 60
+
+Sys.setlocale("LC_TIME", "Danish_Denmark.utf8")
+
+df6$TOD <- as.numeric(format(df6$time, format = "%H")) + as.numeric(format(df6$time, format = "%M")) / 60 + as.numeric(format(df6$time, format = "%S")) / 60 / 60
+
+Sys.setlocale("LC_TIME", "English_United States.utf8")
+df30 <- df30[!is.na(df30$TOD),]
+
+```
+```{r, echo = FALSE, results = 'hide', message=FALSE}
+#time of year calculation. The number should range smoothly from 0 : ~11.99999. If it's anything other than that then it's not calculated right. 
+df30$TOY <- as.numeric(month(df30$time))+as.numeric(day(df30$time))/31
+
+df17$TOY <- as.numeric(month(df17$time))+as.numeric(day(df17$time))/31
+
+Sys.setlocale("LC_TIME", "Danish_Denmark.utf8")
+
+df6$TOY <- as.numeric(month(df6$time))+as.numeric(day(df6$time))/31
+
+Sys.setlocale("LC_TIME", "English_United States.utf8")
+df30 <- df30[!is.na(df30$TOY),]
+
+```
+
+
+
+
+```{r, echo = FALSE, results = 'hide', message=FALSE}
+#estimate initial parameters for all 3 states
+#init_params30 <- initz(na.omit(df30$Depth), ncomp = 3, init.method = "hclust")
+#init_params17 <- initz(na.omit(df17$Depth), ncomp = 3, init.method = "hclust")
+#init_params6 <- initz(na.omit(df6$Depth), ncomp = 3, init.method = "hclust")
+```
+
+
+
+```{r, echo = FALSE, results = 'hide', message=FALSE}
+# Initial values
+### Depth
+mean30_Depth <- c(220.7267738, 591.5, 831.0199)
+sd30_Depth <- c(34.10027, 90.82657, 52.55956)
+shape30_Depth <- c(15.94281, 87.588452)
+scale30_Depth <- c(13.84491, 6.806144)
+df30$Depth[1] <- 1
+
+mean17_Depth <- c(79.70845, 281.24234, 421.93630)
+sd17_Depth <- c(64.42877, 51.46055, 36.73780)
+shape17_Depth <- c(13.6017578, 140.0003906)
+scale17_Depth <- c(25.07972, 2.098351)
+
+mean6_Depth <- c(321.6364, 692.8450, 1078.7261)
+sd6_Depth <- c(76.50733, 72.92805, 146.37132)
+shape6_Depth <- c(11.3389648, 40.0031250)
+scale6_Depth <- c(28.83206, 18.39503)
+```
+
+
+```{r, echo = FALSE, results = 'hide', message=FALSE}
+# distributions for observation processes
+dist <- list(Depth = "gamma")
+```
+
+```{r, echo = FALSE, results = 'hide', message=FALSE}
+### Shark 30
+dat30 <- prepData(df30, coordNames = NULL)
+levels(dat30$ID) <- "shark 30"
+
+# initial parameters
+Par0_m30 <- list(Depth=c(mean30_Depth[1],mean30_Depth[2],
+                               sd30_Depth[1],sd30_Depth[2]))
+# fit model
+m30 <- fitHMM(data = dat30, nbStates = 2, dist = dist, Par0 = Par0_m30)
+
+```
+
+
+```{r, echo = FALSE, results = 'hide', message=FALSE}
+### Shark 17
+dat17 <- prepData(df17, coordNames = NULL)
+levels(dat17$ID) <- "shark 17"
+# initial parameters
+Par0_m17 <- list(Depth=c(mean17_Depth[1],mean17_Depth[2],
+                               sd17_Depth[1],sd17_Depth[2]))
+# fit model
+m17 <- fitHMM(data = dat17, nbStates = 2, dist = dist, Par0 = Par0_m17)
+```
+
+
+```{r, echo = FALSE, results = 'hide', message=FALSE}
+dat6 <- prepData(df6, coordNames = NULL, covNames = "TOY")
+levels(dat6$ID) <- "shark 6"
+### Shark 6
+# initial parameters
+Par0_m6 <- list(Depth=c(mean6_Depth[1],mean6_Depth[2],
+                              sd6_Depth[1],sd6_Depth[2]))
+# fit model
+m6 <- fitHMM(data = dat6, nbStates = 2, dist = dist, Par0 = Par0_m6)
+
+```
+
+
+
+```{r, echo = FALSE, results = 'hide', message=FALSE}
+### Shark 30
+# initial parameters
+Par0_m30_3 <- list(Depth=c(mean30_Depth[1],mean30_Depth[2],mean30_Depth[3],
+                               sd30_Depth[1],sd30_Depth[2],sd30_Depth[3]))
+# fit model
+m30_3 <- fitHMM(data = dat30, nbStates = 3, dist = dist, Par0 = Par0_m30_3)
+```
+
+
+```{r, echo = FALSE, results = 'hide', message=FALSE}
+### Shark 17
+# initial parameters
+Par0_m17_3 <- list(Depth=c(mean17_Depth[1],mean17_Depth[2],mean17_Depth[3],
+                               sd17_Depth[1],sd17_Depth[2],sd17_Depth[3]))
+# fit model
+m17_3 <- fitHMM(data = dat17, nbStates = 3, dist = dist, Par0 = Par0_m17_3)
+
+```
+
+
+
+```{r, echo = FALSE, results = 'hide', message=FALSE}
+### Shark 6
+# initial parameters
+Par0_m6_3 <- list(Depth=c(mean6_Depth[1],mean6_Depth[2],mean6_Depth[3],
+                               sd6_Depth[1],sd6_Depth[2],sd6_Depth[3]))
+# fit model
+m6_3 <- fitHMM(data = dat6, nbStates = 3, dist = dist, Par0 = Par0_m6_3)
+
+```
+
+
+```{r, echo = FALSE, results = 'hide', message=FALSE}
+### Shark 30
+# initial parameters (obtained from nested model m1)
+Par0_m30_TOD <- getPar0(model=m30, formula=~(pbs::pbs(TOD, df=3, periodic=TRUE, Boundary.knots=c(0,24))))
+
+# fit model
+m30_TOD <- fitHMM(data = dat30, nbStates = 2, dist = dist, Par0 = Par0_m30_TOD$Par,
+                        beta0=Par0_m30_TOD$beta, formula=~(pbs::pbs(TOD, df=3, periodic=TRUE, Boundary.knots=c(0,24))))
+```
+
+
+```{r, echo = FALSE, results = 'hide', message=FALSE}
+### Shark 17
+# initial parameters (obtained from nested model m1)
+Par0_m17_TOD <- getPar0(model=m17, formula=~(pbs::pbs(TOD, df=3, periodic=TRUE, Boundary.knots=c(0,24))))
+
+# fit model
+m17_TOD <- fitHMM(data = dat17, nbStates = 2, dist = dist, Par0 = Par0_m17_TOD$Par,
+                        beta0=Par0_m17_TOD$beta, formula=~(pbs::pbs(TOD, df=3, periodic=TRUE, Boundary.knots=c(0,24))))
+
+```
+
+```{r, echo = FALSE, results = 'hide', message=FALSE}
+### Shark 6 TOD 2 state
+#getpar0 from m6 null model // intercept beta_0
+Par0_m6_TOD <- getPar0(model=m6, 
+                       formula=~(pbs::pbs(TOD, df=3, periodic=TRUE, Boundary.knots=c(0,24))))
+
+#Fithmm 
+m6_TOD <- fitHMM(data = dat6, nbStates = 2, dist = dist,
+                 Par0 = Par0_m6_TOD$Par,
+                        beta0=Par0_m6_TOD$beta, 
+                 formula=~(pbs::pbs(TOD, df=3, periodic=TRUE, Boundary.knots=c(0,24))))
+```
+
+
+
+
+```{r, echo = FALSE, results = 'hide', message=FALSE}
+### Shark 30
+# initial parameters (obtained from nested model m1)
+Par0_m30_3_TOD <- getPar0(model=m30_3, formula=~(splines2::mSpline(TOD, df=3, periodic=TRUE, Boundary.knots=c(0,24))))
+
+# fit model
+m30_3_TOD <- fitHMM(data = dat30, nbStates = 3, dist = dist, Par0 = Par0_m30_3_TOD$Par,
+                        beta0=Par0_m30_3_TOD$beta, formula=~(splines2::mSpline(TOD, df=3, periodic=TRUE, Boundary.knots=c(0,24))))
+
+```
+
+
+
+```{r, echo = FALSE, results = 'hide', message=FALSE}
+### Shark 17
+# initial parameters (obtained from nested model m1)
+Par0_m17_3_TOD <- getPar0(model=m17_3, formula=~(pbs::pbs(TOD, df=3, periodic=TRUE, Boundary.knots=c(0,24))))
+
+# fit model
+m17_3_TOD <- fitHMM(data = dat17, nbStates = 3, dist = dist, Par0 = Par0_m17_3_TOD$Par,
+                        beta0=Par0_m17_3_TOD$beta, formula=~(pbs::pbs(TOD, df=3, periodic=TRUE, Boundary.knots=c(0,24))))
+```
+
+
+```{r, echo = FALSE, results = 'hide', message=FALSE}
+### Shark 6
+# initial parameters (obtained from nested model m1)
+Par0_m6_3_TOD <- getPar0(model=m6_3, formula=~(pbs::pbs(TOD, df=3, periodic=TRUE, Boundary.knots=c(0,24))))
+
+# fit model
+m6_3_TOD <- fitHMM(data = dat6, nbStates = 3, dist = dist, Par0 = Par0_m6_3_TOD$Par,
+                        beta0=Par0_m6_3_TOD$beta, formula=~(pbs::pbs(TOD, df=3, periodic=TRUE, Boundary.knots=c(0,24))))
+```
+
+
+```{r, echo = FALSE, results = 'hide', message=FALSE}
+### Shark 30
+# initial parameters (obtained from nested model m1)
+Par0_m30_month <- getPar0(model=m30, formula=~(pbs::pbs(TOY, df=3, periodic=TRUE, Boundary.knots=c(1,13))))
+
+# fit model with formula for transition probabilities
+m30_month <- fitHMM(data = dat30, nbStates = 2, dist = dist, Par0 = Par0_m30_month$Par,
+                        beta0=Par0_m30_month$beta, formula=~(pbs::pbs(TOY, df=3, periodic=TRUE, Boundary.knots=c(1,13))))
+```
+
+
+```{r, echo = FALSE, results = 'hide', message=FALSE}
+### Shark 17
+#initial parameters (obtained from nested model m1)
+Par0_m17_month <- getPar0(model=m17, formula=~pbs::pbs(TOY, df=3, periodic=TRUE, Boundary.knots=c(1,13)))
+
+# fit model with formula for transition probabilities
+m17_month <- fitHMM(data = dat17, nbStates = 2, dist = dist, Par0 = Par0_m17_month$Par,
+                        beta0=Par0_m17_month$beta, formula=~pbs::pbs(TOY, df=3, periodic=TRUE, Boundary.knots=c(1,13)))
+```
+
+
+```{r, echo = FALSE, results = 'hide', message=FALSE}
+### Shark 6
+# initial parameters (obtained from nested model m1)
+Par0_m6_month <- getPar0(model=m6, formula=~pbs::pbs(TOY, df=3, periodic=TRUE, Boundary.knots=c(1,13)))
+
+#fit model with formula for transition probabilities
+m6_month <- fitHMM(data = dat6, nbStates = 2, dist = dist, Par0 = Par0_m6_month$Par,
+                        beta0=Par0_m6_month$beta, formula=~pbs::pbs(TOY, df=3, periodic=TRUE, Boundary.knots=c(1,13)))
+```
+
+
+
+```{r, echo = FALSE, results = 'hide', message=FALSE}
+### Shark 30
+#initial parameters (obtained from nested model m1)
+Par0_m30_3_month <- getPar0(model=m30_3, formula=~pbs::pbs(TOY, df=3, periodic=TRUE, Boundary.knots=c(1,13)))
+
+# fit model with formula for transition probabilities
+m30_3_month <- fitHMM(data = dat30, nbStates = 3, dist = dist, Par0 = Par0_m30_3_month$Par,
+                       beta0=Par0_m30_3_month$beta, formula=~pbs::pbs(TOY, df=3, periodic=TRUE, Boundary.knots=c(1,13)))
+```
+
+
+
+```{r, echo = FALSE, results = 'hide', message=FALSE}
+### Shark 17
+# initial parameters (obtained from nested model m1)
+Par0_m17_3_month <- getPar0(model=m17_3, formula=~pbs::pbs(TOY, df=3, periodic=TRUE, Boundary.knots=c(1,13)))
+
+# fit model with formula for transition probabilities
+m17_3_month <- fitHMM(data = dat17, nbStates = 3, dist = dist, Par0 = Par0_m17_3_month$Par,
+                      beta0=Par0_m17_3_month$beta, formula=~pbs::pbs(TOY, df=3, periodic=TRUE, Boundary.knots=c(1,13)))
+```
+
+
+
+```{r, echo = FALSE, results = 'hide', message=FALSE}
+### Shark 6
+# initial parameters (obtained from nested model m1)
+Par0_m6_3_month <- getPar0(model=m6_3, formula=~pbs::pbs(TOY, df=3, periodic=TRUE, Boundary.knots=c(1,13)))
+
+# fit model with formula for transition probabilities
+m6_3_month <- fitHMM(data = dat6, nbStates = 3, dist = dist, Par0 = Par0_m6_3_month$Par,
+                        beta0=Par0_m6_3_month$beta, formula=~pbs::pbs(TOY, df=3, periodic=TRUE, Boundary.knots=c(1,13)))
+```
+
+
+\newpage
+# **Theory**
+
+To analyse the  data recordings and make appropriate models to deal with the inherent dependency between observations necessary action is required to relax the assumption of independence. Naturally, the Hidden Markov Model is employed to allow for dependence between state distributions. The theory used throughout this chapter is purely from the amazing work of [@zucchini2017hidden]. An overview of the general definitions and notation for the (hidden) Markov chain and some important properties of it will be made. However, we start with a a short description of the independent mixture model for a natural transition into the Markov chain.
+
+## Independent mixture models
+Consider a scenario wherein there exist $m$ distinct states of a r.v, $X$. In such a case, an independent mixture model is comprised of $m$ component distributions and a mixing distribution. For each $i$ ranging from 1 to $m$, the $i$'th component distribution represents the conditional distribution of the random variable $X$, given that $X$ is in state $i$. The mixing process is accomplished by a discrete random variable denoted as $C$, which thereby determines the state assignment for $X$, with a probability $\xi_i$ indicating the likelihood of $X$ being in state $i$.
+
+The probability mass function of $X$ is then neatly written as:
+
+$$
+p(x)=\sum_{i=1}^mP(C=i)P(X=x\mid C=i)=\sum_{i=1}^m \xi_ip_i(x), \quad i=1,\ldots,m.
+$$
+
+$p_i(x)$ is the probability mass function of component $i$ with a corresponding mixing parameter $\omega_i$ of component $i$. The continues case is completely analogous but using densities as opposed to probability mass functions. The parameter estimation for a mixture distribution is commonly carried out using the maximum likelihood (ML) method. The likelihood of a mixture model with $m$ components is determined for both discrete and continuous cases as:
+
+$$
+L(\boldsymbol{\theta}_1,\ldots,\boldsymbol{\theta}_m,\xi_1,\ldots,\xi_m\mid x_1,\ldots,x_n)=\prod_{j=1}^n\sum_{i=1}^m \xi_ip_i(x_j,\boldsymbol{\theta}_i), \quad i=1,\ldots,m.
+$$
+$\boldsymbol{\theta}_1,\ldots,\boldsymbol{\theta}_m$ denotes the parameter vectors of the component distributions and $\xi_1,\ldots,\xi_m$ are mixing parameters with a sum of $1$. Finally, we have $n$ observations, namely $x_1,\ldots,x_n$.
+
+\newpage
+## Markov models
+### Definitions and properties
+    
+Let the set $\{C_t \mid t\in \mathbb{N}\}$ be a sequence consisting of discrete random variables. The elements in the defined is what we call states. The sequence of discrete random variables is said to be a Markov Chain (MC) if it holds that for all $t\in \mathbb{N}$:
+
+$$
+P(C_{t+1}\mid C_t,\ldots,C_1)=P(C_{t+1}\mid C_t).
+$$
+
+This is what we call the Markov property. Intuitively the expression says that the future, $t+1$, is independent of the past $(t-1,\ldots,1)$, given the present, $t$. One can use a directed graph such as the one in figure $1$ to understand the property. Notice the dependent structure between the state which relaxes the general assumption of independence.
+\newline  
+\begin{figure}[ht]
+  \centering
+  \hspace*{-2cm}
+  \begin{tikzcd}[column sep=2.5cm, row sep=2.5cm, scale=1.7, arrows={-stealth, line width=0.5mm}, font=\Large]
+    {} \arrow[r, dotted, shorten <=15mm] & |[draw, circle, minimum size=1.7cm]| C_{t-1} \arrow[r, shift left=0] & |[draw, circle, minimum size=1.7cm]| C_{t} \arrow[r, shift left=0] \arrow[r, shift left=0] & |[draw, circle]| C_{t+1} \arrow[r, shift left=0] & |[draw, circle, minimum size=1.7cm]| C_{t+2} \arrow[r, dotted, shorten >=15mm] & {}
+  \end{tikzcd}
+  \caption{Directed graph displaying the dependency through the present of the random variables $C_t, t\in\mathbb{N}$}
+  \label{fig:my-diagram}
+\end{figure}
+
+The Markov property directly leads us to a key element in the theory of Markov chains, the so called transition probabilities. The transition probabilities, denoted $\gamma_{ij}$ are defined as:
+
+$$
+\gamma_{ij}=P(C_{t+1}=j\mid C_t=i).
+$$
+
+That is, the transition probabilities gives us the probability of jumping from one state $j$ to another state $i$ in one time step $t$ to $t+1$. Note that $j,i\in S$ which we will call the state-space which we will assume (fairly) is finite throughout this thesis.
+    
+A markov chain is homogeneous if the conditional probabilities:
+
+$$
+P(C_{n+1}=j\mid C_n = i)
+$$
+
+do not depend on the current time $n\in\mathbb{N}$, i.e:
+
+$$
+P(C_{n+1}=j\mid C_n = i)=P(C_{m+1}=j\mid C_m = i)
+$$
+
+for some $m,n\in\mathbb{N}$.
+
+Now that the transition probabilities are defined, we can move onto the  one-step transition probability matrix (TPM). Firstly, we define the one-step transition matrix for $m$ steps as:
+
+$$
+\mathbf{\Gamma}(1)=\begin{pmatrix}
+\gamma_{11} & \cdots  & \gamma_{1m} \\ 
+ \vdots &  \ddots &  \vdots\\ 
+\gamma_{m1} &  \cdots & \gamma_{mm}
+\end{pmatrix}.
+$$
+
+The rows of the TPM consists of the previously defined transition probabilities and sum to $1$, $\sum_{j=1}^m\gamma_{ij}=1$, but the columns generally do not.
+
+Now that the one-step TPM is established we move onto the $t$-step TPM. Recall that the transition probabilites is the probability of going from state $i$ to state $j$ in one time step, however, we are interested in doing this in exactly $t$ steps. Using the Markov property one can find the probability of this process by finding the two-step transition probability, then the three-step transition probability, then the four-step transition probability and so on until step $t$.
+
+This is essentially what leads us to an important result which holds for finite state-spaces that eases our computational usage, the Chapman–Kolmogorov equation [@zucchini2017hidden, p. 15]:
+
+$$
+\mathbf{\Gamma}(t+u)=\mathbf{\Gamma}(t)\mathbf{\Gamma}(u).
+$$
+
+Chapman–Kolmogorov equation imply that for all $t\in \mathbb{N}$:
+
+$$
+\mathbf{\Gamma}(t)=\mathbf{\Gamma}(1)^t.
+$$
+
+According to the equation the matrix of exactly $t$-step transition probabilities is the $t$'th power of the one-step TPM. Throughout the rest of the paper we will refer to the one-step TPM, $\mathbf{\Gamma}(1)$, by its abbreviation, $\mathbf{\Gamma}$.
+
+Next, an explanation will be provided for the unconditional probabilities, $P(C_t=j)$, to fully understand the  so called stationary distribution and thus Markov chains.
+
+The unconditional probabilities will be denoted By the row vector:
+
+$$
+\mathbf{u}(t)=(P(C_t=1),\ldots,P(C_t=m)),\quad t\in \mathbb{N}.
+$$
+
+The initial distribution of the Markov is when $u(1)$ which we denotes as $\boldsymbol{\delta}$ which is the probability of the chain starting in each state. Now, to achieve the distribution at time $t+1$ from time $t$ (one time step) we simply multiply by the TPM, $\mathbf{\Gamma}$:
+
+$$
+\mathbf{u}(t+1)=\mathbf{u}(t)\mathbf{\Gamma}.
+$$
+
+That is, we find the distribution in one time step by multiplying the TPM with the unconditional probabilities of a Markov chain being at a given time $t$.
+
+This leads us to the stationary distribution. We say that a Markov Chain with a TPM, $\mathbf{\Gamma}$, has a stationary distribution, $\boldsymbol{\delta}$ (which is a row vector with non-negative elements), if two conditions hold: $1)$ if $\boldsymbol{\delta \Gamma = \delta}$ and $2)$ if $\boldsymbol{\delta 1'}=1$ [@zucchini2017hidden, p. 17]. The first statement asserts that the distribution remains unchanged when moving forward in time steps. The second statement is the condition that $\boldsymbol{\delta}$ satisfies the properties of a probability distribution; the elements of $\boldsymbol{\delta}$ sum to $1$.
+
+Now, if a Markov chain is defined on discrete time on a finite state space $S$ and is homogeneous (or in short; irreducible), then the Markov chain has a unique and strictly positive stationary distribution [@zucchini2017hidden, p. 17]. This relation will be essential in model results and presentation to consider stationary state probabilities. The stationary distribution can be found as follows: The vector $\boldsymbol{\delta}$ with non-negative elements is a stationary distribution of the Markov chain with TPM, $\boldsymbol{\Gamma}$, if and only if:
+
+$$
+\boldsymbol{\delta}(\mathrm{\mathbf{I}}_m-\boldsymbol{\Gamma}+\mathrm{\mathbf{U}})=\boldsymbol{1}
+$$
+
+where $\boldsymbol{1}$ is a row vector of ones, $\boldsymbol{I}_m$ is the $m\times m$ identity matrix and $\boldsymbol{U}$ is a matrix of ones [@zucchini2017hidden, p. 18].
+
+\newpage
+## Hidden Markov models
+
+We will now delve into the hidden Markov model. In the hidden Markov model the states that we defined for the Markov model are now hidden or latent. When we use the notion of 'hidden', we refer to the fact that we can not directly observe the state generating process in the set $\{C_t\mid t\in \mathbb{N}\}$. For animal movement we are often only capable of observing the distance from one location to our current location (step-length) and/or turning angles i.e in this thesis we have depth measurements. For animal movement we typically only have two states which are “encamped” (or “foraging”) and “exploratory” (or “transit”) states [@mcclintock2021momentuhmm, p. 5].
+
+### Definition and properties
+In the non-hidden Markov model we assumed a sequence consisting of discrete random variables we called states. Like the non-hidden Markov model we will consider a set of the form $\{X_t\mid t\in \mathbb{N}\}$. However, now the states, $\{C_t\mid t\in \mathbb{N}\}$, will be hidden in the sense that we only observe the random variables $\{X_t\mid t\in \mathbb{N}\}$ which we will call the state-dependant process which are conditioned on the state at the same time-step, $t$:
+
+$$
+P(C_{t+1}\mid C_t,\ldots,C_1)=P(C_{t+1}\mid C_t),
+$$
+
+and
+
+$$
+P(X_t\mid X_{t-1},\ldots,X_1,C_t,\ldots,C_1)=P(X_t \mid C_t),\quad t\in \mathbb{N}.
+$$
+
+The first equation is simply the Markov property previously described for an unobserved parameter process $\{C_t \mid t\in \mathbb{N}\}$. The second equation is the state-dependent process $\{X_t \mid t\in\mathbb{N}\}$, where the distribution of the current state variable $X_t$ depends solely on the current hidden state $C_t$, and is independent of any previous hidden states or observed variables. Per usual terminology if the Markov chain  $\{C_t\}$ has $m$ states we call $\{X_t\}$ a $m$-state hidden Markov model. For perspective to the thesis; when analyzing animal movement patterns, the observable state-dependent process entails quantifying a specific characteristic that reflects the animal's behavior. This characteristic can be determined through measurements such as step-lengths, speed, velocity and turning-angles derived from location data. However, in our particular scenario, we have solely collected data on swimming depths, which consequently serves as our state-dependent response. 
+
+\newpage
+The structure of the hidden Markov model can be seen in the directed graph, figure 2.
+\newline
+\begin{figure}[ht]
+  \centering
+  \hspace*{1cm}
+  \begin{tikzcd}[column sep=2.5cm, row sep=2.5cm, scale=1.5, arrows={-stealth, line width=0.5mm}, font=\Large]
+  |[draw, circle, minimum size=1.5cm]| X_1                     & |[draw, circle, minimum size=1.5cm]| X_2                     & |[draw, circle, minimum size=1.5cm]| X_3                     & |[draw, circle, minimum size=1.5cm]| X_4           \\
+  |[draw, circle, minimum size=1.5cm]| C_1 \arrow[r] \arrow[u] & |[draw, circle, minimum size=1.5cm]| C_2 \arrow[u] \arrow[r] & |[draw, circle, minimum size=1.5cm]| C_3 \arrow[r] \arrow[u] & |[draw, circle, minimum size=1.5cm]| C_4  \arrow[r, dotted, shorten >=15mm] \arrow[u] & {}
+  \end{tikzcd}
+  \caption{Directed graph of the Hidden Markov Model}
+  \label{fig:my-diagram}
+\end{figure}
+
+Contrary to a independent mixture model the hidden Markov model can be thought of as a special kind of dependent mixture model. In other words, the distribution of $C_t$, the state at time $t$, does depend on the previous state $C_{t-1}$. However, for both the hidden Markov model and the independent mixture model each state has a corresponding different distribution associated with that state. To help us further understand this we now want to consider the probability mass function (pmf) of $X_t$. In the case of discrete observations (;use density with the notation $f_i$ for continuous observations to achieve the same result) we define for $i=1,2,\ldots,m$:
+
+$$
+p_i(x)=P(X_t=x\mid C_t=i).
+$$
+
+$p_i$ is therefore the probability mass function (probability density function, respectively) of $X_t$ when the Markov chain is in state $i$ at time $t$. The continuous case is again treated similarly but with the probability density function associated with state $i$. The $m$ distributions defined above are called the state-dependent distributions of the hidden Markov model. The state-dependent distribution will be chosen later in the thesis.
+
+\newpage
+### The likelihood of a hidden Markov model
+The formula for the likelihood $L_T$ of $T$ consecutive observations $x_1, x_2,\ldots,x_T$ assumed to be generated by an $m$-state hidden Markov model can we written neatly [@zucchini2017hidden, p. 37]:
+
+$$
+L_T=\boldsymbol{\delta}\mathrm{\mathbf{P}}(x_1)\mathrm{\mathbf{\Gamma P}}(x_2)\mathrm{\mathbf{\Gamma P}}(x_3)\ldots\mathrm{\mathbf{\Gamma P}}(x_T)\mathrm{\mathbf{1'}}.
+$$
+
+The components of the likelihood are: $\boldsymbol{\delta}$ is the initial distribution, $\boldsymbol{\Gamma}$ is the transition probability matrix and $\mathrm{\mathbf{P}}(x_i)=\mathrm{diag}(p_1(x_i), p_2(x_i),\ldots, p_m(x_i))$  is a diagonal matrix of the $m$-state Markov chain with the state-dependent distributions in the diagonal.
+
+However, if $\boldsymbol{\delta}$ which is the stationary distribution of the Markov chain, then it follows from $\boldsymbol{\delta}\mathrm{\mathbf{\Gamma}}=\mathrm{\boldsymbol{\delta}}$ that:
+
+$$
+L_T=\boldsymbol{\delta}\mathrm{\mathbf{\Gamma P}}(x_1)\mathrm{\mathbf{\Gamma P}}(x_2)\mathrm{\mathbf{\Gamma P}}(x_3)\ldots\mathrm{\mathbf{\Gamma P}}(x_T)\mathrm{\mathbf{1'}}.
+$$
+
+The fact that the likelihood is recursive is a significant characteristic of hidden Markov models and one of the reasons why they are widely used. This property enhances the efficiency of likelihood computation when data streams are observed without error and at regular time intervals [@mcclintock2021momentuhmm, p. 6]. However, if location data exhibit temporal irregularities or are affected by measurement errors, then they cannot be utilized for conventional maximum-likelihood hidden Markov model analyses that rely on the forward algorithm [@mcclintock2021momentuhmm, p. 23]. The recursive nature plays a fundamental role, not only in the evaluation of likelihood and consequently the estimation of parameters, but also in the domains of forecasting, decoding most likely state sequences and model checking. We will now address what the forward algorithm actually is and later on discuss the potential issues that could arise in terms of our data.
+
+The matrix expression for the likelihood given above has an important yet straightforward implication - the development of the 'forward algorithm' for computing the likelihood recursively.
+
+We start the forward algorithm by defining the forward probabilities as a vector $\boldsymbol{\alpha}_t$, for $t = 1, 2,\ldots,T,$ by:
+
+$$
+\boldsymbol{\alpha}_t=\boldsymbol{\delta}\mathrm{\mathbf{ P}}(x_1)\mathrm{\mathbf{\Gamma P}}(x_2)\mathrm{\mathbf{\Gamma P}}(x_3)\ldots\mathrm{\mathbf{\Gamma P}}(x_t)=\boldsymbol{\delta}\mathrm{\mathbf{ P}}(x_1)\prod_{s=2}^{t}\mathrm{\mathbf{\Gamma P}}(x_s).
+$$
+
+However, we have to use the convention that an empty product is equal to the identity matrix. It follows from the definition given above that:
+
+$$
+L_T=\boldsymbol{\alpha}_t\mathrm{\mathbf{1'}}, \quad \text{and} \quad \boldsymbol{\alpha}_t=\boldsymbol{\alpha}_{t-1}\mathrm{\mathbf{\Gamma P}}(x_t)\quad \text{for}\;t\geq2.
+$$
+\newpage
+Hence, we can organize the computations required for the likelihood formula in the following convenient manner:
+
+$$
+\boldsymbol{\alpha}_1=\mathrm{\mathbf{\Gamma P}}(x_1);
+$$
+$$
+\boldsymbol{\alpha}_t=\boldsymbol{\alpha}_{t-1}\mathrm{\mathbf{\Gamma P}}(x_t) \quad \text{for}\; t=2,3,\ldots,T;
+$$
+$$
+L_T=\boldsymbol{\alpha}_T\mathrm{\mathbf{1'}}.
+$$
+
+
+We now consider the number of operations required. Note that if the Markov chain has $m$ states, then  $\mathrm{\mathbf{P}}(x_t)=\mathrm{diag}(p_1(x_i), p_2(x_i),\ldots, p_m(x_i))$ has $m$ elements in the diagonal, $\mathrm{\mathbf{\Gamma}}$ is a $m\times m$-matrix and $\boldsymbol{\delta}$ has $m$ elements as it is a row vector with $m$ elements. For each of the values $t$ in the loop, we need to compute exactly $m$ elements of the vector $\boldsymbol{\alpha}_t$ to be computed and each of those elements is a sum of $m$ products of
+three quantities. These are: an element of $\boldsymbol{\alpha}_{t-1}$, a transition probability $\gamma_{ij}$ from $i$ to $j$, and a state-dependent probability (;density) $p_j(x_t)$. The number of operations is therefor of order $tm^2$, $\mathcal{O}(Tm^2)$, to calculate the likelihood for the hidden Markov model.
+
+If $\boldsymbol{\delta}$, the stationary distribution of the Markov chain, is assumed to be the distribution of $C_1$, the corresponding computation is as follows:
+
+$$
+\boldsymbol{\alpha}_0=\boldsymbol{\delta}\\
+$$
+$$
+\boldsymbol{\alpha}_t=\boldsymbol{\alpha}_{t-1}\mathrm{\mathbf{\Gamma P}}(x_t)\quad \text{for} \; t=1,2,\ldots,T
+$$
+$$
+L_T=\boldsymbol{\alpha}_T\mathrm{\mathbf{1'}}
+$$
+
+because of $\boldsymbol{\delta\Gamma}=\boldsymbol{\delta}$. The elements of the vector $\boldsymbol{\alpha}_t$ are called forward probabilities. Assuming the stationary and the initial distribution are the same can ease computation but would need justification [@michelot2016movehmm, p. 1310].
+
+For missing observations $x_t$ the diagonal matrices $\mathrm{\mathbf{P}}(x_t)$ corresponding to the matrices evaluated at the missing values are replaced by the identity matrix. The state-dependent probabilities is simply replaced by $1$'s in the diagonal for all states $i$ when data is missing. If we can assume that the missingness is ignorable then the ignorable likelihood is also a reasonable basis for estimating parameters [@zucchini2017hidden, p. 40].
+
+\newpage
+# **Statistical methodology**
+In the preceding section, we provided an overview of the fundamental theoretical principles underlying a hidden Markov model. This section will build upon those concepts to illustrate a specific hidden Markov model that is designed to examine the movement patterns of the three Greenland sharks. We also explain how the model will be implemented in practice, including a discussion of the data that will be utilized in the analysis. All data preparation and modeling is conducted in R, utilizing the **`momentuHMM`** [@mcclintock2022momentuhmmP], **`mixR`** [@mixR2021P], and **`moveHMM`** [@michelot2022movehmmP] packages.
+
+## Model building and data exploration
+We now employ our previously discussed theory to build hidden Markov models for the three Greenland sharks. The state-dependent sequence $\{X_t\}$ will use the data stream `Depth` in meters recorded with the tags. The distribution used to model the state-dependent sequence will be a $\Gamma$-distribution which is made from considerations from figure 3 since the depth density plot is somewhat right skewed. We will use two to three $\Gamma$-distributions as the state-dependent distribution. The parametrization of the distribution will be discussed later and how the initial parameters are chosen to start the estimation. 
+
+```{r, results='hide', fig.width=15, fig.height=5, fig.cap="Histograms of Shark Depths"}
+p1<- ggplot(df6, aes(x = Depth)) +
+  geom_histogram(binwidth = 20, fill = "blue", color = "black") +
+  xlab("Depth (m)") +
+  ylab("Frequency") +
+  ggtitle(" Shark 6") + 
+  theme(axis.line = element_line(colour = "black")) +
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+p2<- ggplot(df17, aes(x = Depth)) +
+  geom_histogram(binwidth = 20, fill = "blue", color = "black") +
+  xlab("Depth (m)") +
+  ylab("Frequency") +
+  ggtitle("Shark 17") + 
+  theme(axis.line = element_line(colour = "black")) +
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+p3<- ggplot(df30, aes(x = Depth)) +
+  geom_histogram(binwidth = 20, fill = "blue", color = "black") +
+  xlab("Depth (m)") +
+  ylab("Frequency") +
+  ggtitle("Shark 30") + 
+  theme(axis.line = element_line(colour = "black")) +
+  theme(plot.title = element_text(hjust = 0.5))
+  
+grid.arrange(p1,p2,p3, ncol=3)
+```
+
+\newpage
+The two-state hidden Markov models commonly used for animal movement analysis are generally classified as "encamped" or "foraging" states and "exploratory" or "transit" states. The former is characterized by area-restricted search-type movements, with shorter step lengths and little to no directional persistence, while the latter is characterized by migratory-type movements, with longer step lengths and high directional persistence [@morales2004]. However, we only have movement in one direction for the response variable, namely depth. If we consider the speed (;difference in depth from $t$ to $t+1$ in absolute value) for the sharks as figure 4 illustrate, we don't see any overlapping state processes which will make the identification of an encamped or foraging state harder. On top of this the velocity (the increments in depth) are one-dimensional. However, this issue will be addressed in the Discussion section of the thesis. The three state hidden Markov model will also be considered. In this case the states considered would generally be (“resting”, “foraging”, “transit”) [@mcclintock2021momentuhmm, p. 8]. We note that it is extremely difficult to identify with biological reasoning $>2$ states [@beyer2013effectiveness] and that the number of states should be chosen based on underlying theory prior to analysis [@michelot2022movehmm, p. 4]. However, it is possible for a transition from one state to another to occur without it being classified as a state itself. For the previously mentioned reasons we choose to only consider the two and three state hidden Markov model for the sharks. Note that Bayesian approach to model selection differs from this approach since $m$ is a parameter whose value is assessed from its posterior distribution in the Bayesian approach opposed to the frequentist that this thesis is based on [@zucchini2017hidden, p. 114].
+
+```{r, results='hide', fig.width=15, fig.height=5, fig.cap="Histograms of Shark Speeds"}
+s1 <- ggplot() +
+  geom_histogram(aes(x = abs(c(NA, diff(as.numeric(df6$Depth))))), fill = "blue", color = "black", binwidth = 2) + xlab("Speed") + xlim(0,80) + ylim(0,8000)+ 
+  theme(axis.line = element_line(colour = "black")) +
+  theme(plot.title = element_text(hjust = 0.5))+
+  xlab("Speed") +
+  ylab("Frequency") +
+  ggtitle("Shark 6") 
+s2 <-ggplot() +
+  geom_histogram(aes(x = abs(c(NA, diff(as.numeric(df17$Depth))))), fill = "blue", color = "black", binwidth = 2) + xlab("Speed") + xlim(0,80) + ylim(0,8000)+ 
+  theme(axis.line = element_line(colour = "black")) +
+  theme(plot.title = element_text(hjust = 0.5))+
+  xlab("Speed") +
+  ylab("Frequency") +
+  ggtitle("Shark 17") 
+s3 <-ggplot() +
+  geom_histogram(aes(x = abs(c(NA, diff(as.numeric(df30$Depth))))), fill = "blue", color = "black", binwidth = 2) + xlab("Speed") + xlim(0,80) + ylim(0,8000)+ 
+  theme(axis.line = element_line(colour = "black")) +
+  theme(plot.title = element_text(hjust = 0.5))+
+  xlab("Speed") +
+  ylab("Frequency") +
+  ggtitle("Shark 30") 
+grid.arrange(s1, s2, s3, ncol=3)
+```
+
+\newpage
+The motivation behind the seasonal and diurnal effects for the model building is based on two aspects. Firstly, we are lacking covariates and response variables to examine other patterns such as hunting (scavenger/predator-movement). Secondly, the depths vs. time plots seen below where we see a great diversity from every time point in the data suggesting that the time of day and/or time of month for every shark is of interest to examine their movements. For more visual presentations of the difference of depths in each unique month see figure S5 in the supplements.
+
+```{r, fig.cap="Depth (m) vs. time plot for every shark", fig.width=15, fig.height=5}
+m1<- ggplot(df6, aes(x = time, y = Depth)) + geom_point(color = "blue")+
+  xlab("Time") +
+  ylab("Depth (m)") +
+  ggtitle("Shark 6") 
+m2<- ggplot(df17, aes(x = time, y = Depth)) + geom_point(color = "blue")+
+  xlab("Time") +
+  ylab("Depth (m)") +
+  ggtitle("Shark 17") 
+m3<-ggplot(df30, aes(x = time, y = Depth)) + geom_point(color = "blue")+
+  xlab("Time") +
+  ylab("Depth (m)") +
+  ggtitle("Shark 30")
+grid.arrange(m1, m2, m3, nrow=1)
+```
+
+\newpage
+### State-dependent distributions
+The state-dependent distributions discussed in the earlier chapter are the probability density functions of the state-dependent process $\{X_t\}$ associated with state $i$:
+
+$$
+f(X_t\mid C_t=i)=f_i(X_t)
+$$
+
+The response variable, depth, is positive bimodal and composed of two slightly right skewed distributions. We therefore choose the $\Gamma$-distribution in respect to the two different peaks in depth when initializing our model. 
+
+The $\Gamma$-distribution is characterized by a shape parameter $\alpha$ and a scale parameter $\beta$, with a mean of $\mu=\alpha\beta$ and a variance of $\sigma^2=\alpha\beta^2$. The probability density functions, which are dependent on the state, are given at time $t$ as:
+
+$$
+f_i(X_t)=\Gamma(\alpha_i)^{-1}\beta_i^{-\alpha_i}X_t^{\alpha-1}e^{\frac{X_t}{\beta_i}},\quad i=1,\ldots,m,
+$$
+
+where $\Gamma$ is the $\Gamma$-function and $m$ is as usual the number of states chosen prior to the analysis. In the **`momentuHMM`** package that we will use for fittings we reparameterize the $\Gamma$-distribution though the mean $(\mu)$ and standard deviation $(\sigma)$ that we defined. Rewriting these expressions yield $\alpha=\mu^2/\sigma^2$ and $\beta=\sigma^2/\mu$ which we can substitute into our previous expression for the distributions:
+
+$$
+f_i(X_t)=\Gamma(\mu_i^2/\sigma^2_i)^{-1}(\sigma_i^2/\mu_i)^{-\mu_i^2/\sigma^2_i}X_t^{\mu_i^2/\sigma_i^2-1}e^{\frac{X_t}{\sigma_i^2/\mu_i}},\quad i=1,\ldots,m.
+$$
+
+The state-dependent distributions will be plotted for each state. Note that we are only analyzing a one-dimensional response variable, namely depth, which will hinder the biological interpretation of the states. We will get into the interpretation complication in the results section of the thesis.
+
+\newpage
+### Implementation of covariates
+In this section we decide which covariates should enter the model and how they should enter the model. We are fitting the intercept ($\beta_0$) only model, time of day (TOD) periodic spline with a period of $24$ hours and a time of year (TOY) periodic spline model with a period of $12$ months. The TOD model will check for diurnal patterns and TOY for seasonal patterns. As the computational power required to fit all these models is already extremely high we will not check for any interactions or the model with both covariates entering. In total, we fit $18$ models in total: For every shark we will fit a $2$ and $3$ state intercept only, a TOD-periodic spline and a TOY-periodic spline.
+
+We use the transition probabilities and employ the covariates TOD and TOY on the transition probabilities. To do this, we introduce a linear predictor, $\eta$:
+
+$$
+\eta=\mathbf{Y}\boldsymbol{\beta}.
+$$
+
+The linear predicor is composed of $\mathbf{Y}$ which is the model matrix associated with the fitted model and $\mathbf{\beta}$ which is the vector of fixed effects for that model. The predictor is convenient because it allows the covariates to effect the transition probabilities through the defined predictor. We use the multinomial logit model [@mcclintock2021momentuhmm, p. 11] with the described linear predictor to acquire the transition probabilities from state $i$ to $j$ in $t$ steps:
+
+$$
+\gamma_{ij}^{(t)}=\frac{\exp(\eta_{ij}^{(t)})}{\sum_{k=1}^m \exp (\eta_{ik}^{(t)})}
+$$
+
+To ensure that the TPM rows sum to $1$, we let $\eta_{ij}^{(t)}=0$ for $i=j$. For a $m$-state hidden Markov model we have $m\times m$ entries in $\boldsymbol{\Gamma}$ but only $m\times (m-1)$ free parameters. This is because of the row constraint set on the TPM where there is $m$ row sum constraints [@zucchini2017hidden, p. 51]:
+
+$$
+\sum_{k=1}^m\gamma_{ik}=1,\quad i=1,\ldots,m.
+$$
+
+\newpage
+### Parameters
+In a Hidden Markov Model, the count of parameters relies on the count of states, the inculsion of covariates and the state-dependent distributions. For my models, the number of states and the involvement of covariates will be variable, causing a fluctuation in the number of parameters that must be estimated. We will be fitting a model without covariates and models where we let the TOD and TOY enter as a periodic spline.
+
+Firstly, let us consider the case with no covariates. When we fit a covariate free model for a $m$-state hidden Markov model we need to estimate 1) the transition probabilities: $(m^2-m)$ parameters because of the row constraint mentioned in the covariates-subsection. 2) The parameters of the state-dependent distribution in each $m$-states: $2m$ parameters as we parameterized the $\Gamma$-distribution through the mean and standard deviation. 3) The initial distribution: $m$ parameters for the initial distribution. The latter is why assuming the animal is in the stationary distribution when tagged is computationally forgiving. Summing up the parameters comes out to a total:
+
+$$
+(m^2-m)+2m+m=m^2+2m
+$$
+
+parameters for the $m$-state hidden Markov model with no covariates. 
+
+Now to the more complex model using the periodic spline with three degrees of freedom. This will count for both the TOY and the TOD model. The parameters for the state-dependent distribution and the initial distribution remain unchanged. However, the parameters for the transition probabilities now total to $4(m^2-m)$. This is because we have to estimate both the intercept and the three basis function for the periodic spline. In total, this means that the number of parameters to be estimated will now be:
+
+$$
+4(m^2-m)+2m+m=4m^2-m.
+$$
+
+\newpage
+## Model selection and fit
+### AIC
+We need a way to decide between a number of appropriate states, $m$, and/or which covariates that provides the best fit for our data. In other words, we need a criterion to decide which model to choose amongst the multiple models fitted to find the relatively best model.
+
+We therefor employ the Alkaike information criterion (AIC) [@zucchini2017hidden, p. 98]. The AIC is defined as:
+
+$$
+AIC = -2 \log{L}+2p
+$$
+
+where $L$ is the log-likelihood and $p$ is the number of parameters. The fit of the model is quantified by the first term, which diminishes as the number of states $m$ increases. The second term represents a penalty that grows as $m$ increases. We say that the AIC penalizes complex models because the $2p$ term inthe AIC means that the AIC will go up by $2$ for every additional parameter estimated. This is how AIC penalizes models for adding extra terms since the more complex models will subject the data to overfitting but will not necessarily be the best model for new data that is not a part of the training data. We will calculate the AIC for each model and compare them. We use the rule of thumb offered by [@burnham2004multimodel p.270-272] that states: Some simple rules of thumb are often useful in assessing the relative merits of models in the set: Models having $\Delta i\leq 2$ have substantial support (evidence), those in which $4\leq \Delta i \leq 7$ have considerably less support, and models having $\Delta i > 10$ have essentially no support.
+
+Note however that [@burnham2011aic] relaxed the rule of thumb and thus $2\leq \Delta i \leq 7$ have some support and should seldom be disregarded.
+
+We now have to be cautious when using solely the AIC for model selection and specifically for a hidden Markov model because we can easily have the data subject to overfitting [@van2016overfitting, p. 2]. Order estimation of states presents a significant challenge due to non-identifiability, which arises when a hidden Markov model includes more states than the observations can support. To battle the non-identifiability, we have to check for the amount of observations in each state, as we do not want a state with very few observations. We also use the previously mentioned fact that $>2$ states is generally hard to give biological reasoning for. The AIC itself does not address the goodness of fit of the model but only comparability to the other models. Furthermore, we want a model that can be used for interpretation of the sharks movement. 
+
+\newpage
+### Pseudo-residuals and ACF
+For overall goodness of fit we employ the pseudo-residuals [@zucchini2017hidden, p. 101]. A good fit for the selected modelS will be seen on a Q-Q-plot by normally distributed pseudo-residuals. We will derive the pseudo-residuals for our response variable, depth. The pseudo-residuals, also known as quantile residuals, can be calculated using the **`PseudoRes`**-command in **`momemntuhmm`**. If the model being fitted is the accurate process for generating the data, these residuals will adhere to a standard normal distribution. Put simply, any departure from normality suggests a lack of suitability in the model. The realizations computed measure the deviation from the median. This means that the numerical value of the realizations increases with an increasing deviation from that median. This way outliers can be located with more ease. The autocorrelation function (ACF) [@zucchini2017hidden, p. 18] will also be plotted for the chosen modelS to check if we have captured the serial dependency in the data. There might be a longer memory in the data that is not captured and we would have to either increase the number of states or let new covariates enter [@michelot2022hmmtmb, p. 13].
+
+\newpage
+## Fitting in R
+The fitting of the hidden Markov models will mostly be done with the R package **`momentuhmm`** [@mcclintock2022momentuhmmP]. We use the function **`fitHMM`**. In this approach, we adopt an incremental strategy by initially employing a simpler model without any covariates. Within the **`momentuHMM`** framework, the **`getPar0`**-command is utilized to retrieve initial parameters from a fitted (nested) hidden Markov model, utilizing the provided arguments for the more intricate model. The simpler model is the intercept only model with the more intricate model being the TOD model or the TOY model. We proceed with **`fitHMM`** which optimizes the log-likelihood function numerically using the previously described algorithm namely, the forward algorithm. When using numerical optimization for parameter estimation, the initial values chosen for the parameters can significantly impact the optimization process and thus computation time. This is because the optimization is not analytical, but rather uses derivatives of the likelihood function to iteratively update the parameter values in order to maximize the likelihood. However, this approach can lead to the optimization getting stuck in a local optimum instead of the global optimum, especially if the likelihood function is not convex. If the likelihood function decreases at any point during the optimization process, the algorithm will backtrack and the parameter values may get stuck around that point, making it difficult to escape local optima. To possibly avoid this we use values the gives us the best likelihood.
+
+To possibly avoid the phenomenon we use the **`mixR`** package [@mixR2021P]. The **`mixR`** package function **`initz`** utilizes either hierarchical clustering method or K-means clustering algorithm to derive the mean and standard deviation of each component of a mixture model. This function is particularly useful for automatically determining initial values for the **`fitHMM`**-command, allowing for mixture model selection through bootstrapping likelihood ratio test or information criteria. We will use both hierarchical clustering and K-means clustering. We will also employ the method described in [michelot2019short]. This method is rather simple but is based on 'eyeballing' the depth histograms for each shark to derive starting values. We will not go further into these methods but note this is the one in use and then proceed with the values that gives us the best likelihood. We thus run all models with three different starting points which means that we run the $18$ models $3$ times each for a total of $54$ fittings.
+
+We use the **`formula`** argument to let the covariates TOY and TOD effect the transition probabilities in the previously described way in the Covariates section through the linear predictor. We will not assume that the sharks are in their stationary distribution as their initial distribution when tagged. This is because the sharks are dazed/disoriented for some time after tagging. As this is the case our computation will require $m$ more parameters and thus increase computational usage.
+
+\newpage
+## Data
+The data is provided by Julius Nielsen for the three sharks. Namely, Shark 6, 17 and 30. We shortly describe the data for each shark. Maps of the sharks tagging mentioned below can be seen in supplementary material figure S1 and figure S2.
+
+Shark 6 is female and $3.1m$ in length. The shark was tagged  in the QEQ area in west Greenland with three tags: one DesertStar (tag $1$) and two miniPATs (tag $2$ and tag $3$). However, we have no data from the DesertStar tag and one of the tags stopped recording and later came back to life. The two miniPATs do despite the conditions almost have the same ammount of data. However, we choose to just use tag $2$ as the recordings for some entries differ over 30$\%$ from tag $2$ to $3$. The data set contains two columns of interest for this specific thesis. Firstly, 21888 depth observations ranging from $28.5m$ to $1292.5m$ excluding the $2592$ missing depth observations. secondly, we have a column recording time regularly every $5$ minutes with the first recording being on the $12$th May $2014$ and the last recording being made the $23$th September $2014$. This constitute about $134$ days at liberty for the used tag. 
+
+Shark 17 is female and the largest at $4.3m$ in length. The shark was tagged in the GRA area in south west Greenland with two tags: a mrPAT and a miniPAT. We do not have any data from the mrPAT tag. The data set contains two columns of interest for this specific thesis. Firstly, $41725$ depth observations ranging from $142.5m$ to $640m$. secondly, we have a column recording time regularly every $2.5$ minutes with the first recording being on the $29$th June $2016$ and the last recording being made the $27$th September $2016$. This constitute about $91$ days at liberty for the used tag.
+
+Shark 30 is also female and $2.8m$ in length. The shark was tagged with a miniPAT tracking device in the KUM area in south east Greenland. The data set contains two columns of interest. Firstly, $51962$ depth observations ranging from $72m$ to $929.5m$ excluding the $6959$ missing depth observations. secondly, we have a column recording time regularly every 5 minutes with the first recording being $19$th September $2012$ and the last recording being made the $16$th June $2013$. However, because of daylight savings time the recorder has $12$ missing time recordings ($12 \times 5 \;\text{minutes}=1\; \text{hour}$). We manually correct the missing time recordings to keep the regularity in the data. We therefore have about $270$ days at liberty for the used tag.
+
+\newpage
+# **Results**
+In this section we will go over the results for each shark, that is, choosing a model, describing and presenting the model for each shark.
+
+## Selecting the models
+We notice in table 1 that the 3 state models perform best for all sharks with the best 3 state model being TOY. The TOY model has an AIC $\Delta AIC>10$ compared to the second best model, being the 3 state TOD model for shark 6 and 17, but 3 state intercept for shark 30.
+
+```{r}
+
+dftry <- data.frame(
+                 "Shark 6" = c(237620.4, 227662.8, 237611.2, 227645.7, 237558.9, 227560.9),
+                 "Shark 17" = c(451946.7, 429183.1, 451940.3, 429160.2, 451789.7, 428892.6),
+                 "Shark 30" = c(566068.7, 532996.7, 566082.1, 533023, 565888, 532846.3)
+)
+
+rownames(dftry) <-
+	c(
+		"2 state, intercept",
+		"3 state, intercept",
+		"2 state, TOD",
+		"3 state, TOD",
+		"2 state, TOY",
+		"3 state, TOY"
+	)
+colnames(dftry)<- c("Shark 6", "Shark 17", "Shark 30")
+mins = apply(dftry, MARGIN = 2, FUN = function(x) x == min(x, na.rm = TRUE))
+mins[] = ifelse(is.na(mins), FALSE, mins)
+
+options(knitr.kable.NA = '-')
+
+kbl(
+	dftry,
+	longtable = T,
+	booktabs = T,
+  linesep = "\\addlinespace",
+	caption = "AIC for all the fitted models"
+) %>% 
+	add_header_above(c( " ", "AIC" = 3 ), bold = TRUE) %>% 
+	column_spec(column = 2, bold = mins[,1]) %>% 
+	column_spec(column = 3, bold = mins[,2]) %>% 
+	column_spec(column = 4, bold = mins[,3])%>%
+  row_spec(0, bold = TRUE)%>% 
+	column_spec(column = 1, bold = TRUE)
+```
+
+Because of the previously described issues in the Model selection section we now examine if 2 or 3 states makes sense for further analysis. We consider the state-dependent distributions and the corresponding means in each unique state. Using the Viterbi-algorithm time spent in each state will be derived to check for negligible states. The next page shows figure 6 which is a plot of the decoded state-dependent distributions for the TOY model for 2 and 3 states. To avoid cluttering the thesis we include histograms of the depths separated by each state-dependent distribution in supplementary figure S3 and S4 which will be used thoroughly to examine the fit of the state-dependent distributions and attributed depths to the states.
+
+\newpage
+```{r, echo=FALSE, fig.show='hold'}
+
+knitr::asis_output("\\begin{minipage}{\\textwidth}\n\\hspace{-2cm}\n\\includegraphics[width=8in]{Blank 6 Grids Collage.png}\n\\end{minipage}")
+```
+\begin{center}
+Figure 6: Decoded state distributions for both 2 and 3 states of the TOY model. The rows represent each shark.
+\end{center}
+
+\newpage
+The models for shark 30 did not converge. We choose to not include these in the results and model selection for that reason and for simpler comparability between 2 sharks. We refer to figure S6 and S7 for the plots relating to the 2 state TOY model for shark 30 which would have been the chosen model. However, we choose to include plots and parameters for shark 30 for the purpose of discussion (for example Pseudo-residuals, ACF).
+
+The older Shark 17 has a complicated pattern for the 3 state model compared to the 2 state model. If we decode the most likely state sequence we see that the time spent in each state is $5.3\%$, $37.7\%$ and $57\%$ in that order which is not negligible for any of the states. The means in the 3 different states are $340.2m\pm229.7$, $295.5m\pm29.8$ and $425.7m\pm39.1$, respectively. If we stratify the Viterbi decoded states and plot the depths attributed to each state for the 2 and 3 state model we achieve the plots in the supplementary figures S3 and S4. We see that state 1 which has the large standard deviation arises from a concentration of depths at the low and high end but no depth measurements between these levels. The $\Gamma$-distribution is also not that well of a fit. This indicates a overfitting issue in the 3 state models as lower depths are not attributed to state 2 and higher depths not to state 3. This issue is however fixed neatly with $\Gamma$-distributions fitting nicely in the 2 state model and we therefore choose the 2 state model.
+
+Lastly, we consider the younger shark 6. Shark 6 has relatively bad fit for the state-dependent distributions for both the 2 and 3 state model in the sense that the distribution fit to the data is not great. However, the 3 state model is more adequately catching low and deeper depths compared to the 2 state model. This can be seen by the supplement figure S3 where we stratify for depths in the 2 state model. We also see that the 3 state model is visited in each of the 3 state a non-negligable percentage of times, $62.2\%$, $23.5\%$ and $14.3\%$, respectively. It can be easily be seen that state 2 in the 2 state model is accounting for mainly high and low depths in figure S3 where these are split into 2 states in the 3 state model in figure S4. To further support this claim we see that the means for the 2 state model is $336.4m\pm40$ and $403\pm 240$, in that order where as it is $344.3m\pm36$,  $231.2m\pm 80$ and  $623.3m\pm149$ in that order for the 3 state model. The deviation in state 2 for the 2 state model arises because of extreme low and high depths getting attributed into state 2. As a consequence of these described factors we choose the 3 state model over the 2 state model for shark 6.
+
+\newpage
+## Checking the models using pseudo-residuals and ACF
+
+Now that the models have been chosen we turn our eyes onto the model fit and the residuals on figure 7 (next page). We remind in short that if the model being fitted is the accurate process for generating the data, these residuals will adhere to a standard normal distribution. Put simply, any departure from normality suggests a lack of suitability in the model.
+
+The pseudo-residuals show a large lack of fit for shark 6 and 17. The left tail is extremely light but the behavior is also seen at the right tail for larger quantiles. The center sample quantiles are however seen to be normally distributed. The pseudo-residuals for shark 30 are of much better fit but with a light right tail indicating a small lack of fit as well.
+
+Considering the autocorrelation in the data, we see the ACF plot reveals a clear trend and a significant residual autocorrelation, indicating that the model failed to capture a substantial portion of the autocorrelation present in the data for every shark. Successive depths within each state are not independent which is clearly evident in the ACF presented above. Unfortunately, there is no singular solution to address this issue. Nonetheless, several approaches can be considered, such as augmenting the number of states or introducing covariates to account for the autocorrelation. However, it appears that increasing the number of states may not be effective in resolving this problem. It is more likely that we are missing a relevant covariate that would provide a better explanation for the observed movement. Furthermore, the computational power is quite limiting to test for effects of both TOD and TOY or any interactions.
+
+Since the residuals are not adequately fit for shark 6 and 17 and the ACF is displaying issues with the models at hand for every shark we have to be careful when drawing conclusions from these models. We choose to proceed with the models for the purpose of this thesis.
+
+\setcounter{figure}{6}
+\newpage
+```{r, echo=FALSE, fig.show='hold', out.height="95%", out.width="105%"}
+
+knitr::include_graphics("combinedPR.png")
+```
+\begin{center}
+Figure 7: Pseudo-residuals and ACF for TOY models. 
+\end{center}
+
+\newpage
+## Presentation and interpretation of the models
+In this section we present our models and try to give an interpretation to each state. Reasons will be given in the discussion why the state interpretation may be a difficult task. 
+
+In the fitted model we parameterized the $\Gamma$-distribution using different initial values to achieve the best likelihood. We ended up with the mean and standard deviation for each state for the TOY models as seen in table 2. The $95\%$ confidence intervals for the parameters are derived by employing the delta method and finite-difference approximations of the first derivative on the transformation, using the working parameter estimates [@mcclintock2021momentuhmm, p. 24].
+
+```{r}
+dftry2 <- data.frame(
+                 "Shark 6" = c("$8.8 \\cdot 10^{-7}$, $9.9 \\cdot 10^{-1}$, $5.6 \\cdot 10^{-9}$", "344.29 (343.42, 345.16)", "36.67 (36.03, 37.30)", "231.20 (228.71, 233.69)", "80.47 (78.75, 82.20)", "623.30 (616.87, 629.75)", "149.24 (145.27, 153.22)"),
+                 "Shark 17" = c("$1.0 \\cdot 10^0$, $4.0 \\cdot 10^{-39}$", "291.17 (290.15, 292.19)", "64.38 (63.68, 65.08)", "433.76 (433.13, 434.38)", "43.79 (43.36, 44.20)", NA, NA),
+                 "Shark 30" = c("$1.0 \\cdot 10^0$, $1.7 \\cdot 10^{-8}$", "221.37 (220.80, 221.93)", "55.39 (54.97, 55.82)", "597.86 (596.88, 598.84)", "60.16 (59.43, 60.90)", NA, NA)
+)
+
+rownames(dftry2) <-
+	c(
+	  "$\\boldsymbol{\\delta}$",
+		"$\\boldsymbol{\\mu_1}$",
+		"$\\boldsymbol{\\sigma_1}$",
+		"$\\boldsymbol{\\mu_2}$",
+		"$\\boldsymbol{\\sigma_2}$",
+		"$\\boldsymbol{\\mu_3}$",
+		"$\\boldsymbol{\\sigma_3}$"
+	)
+colnames(dftry2)<- c("Shark 6", "Shark 17", "Shark 30")
+options(knitr.kable.NA = '-')
+kbl(
+	dftry2,
+	longtable = T,
+	booktabs = T,
+  linesep = "\\addlinespace",
+	caption = "Initial distribution, state-dependent parameters and confidence intervals for chosen TOY model for every shark",
+	escape = FALSE
+) %>% 
+	add_header_above(c( " ", "Parameters" = 3 ), bold = TRUE)%>%
+  row_spec(0, bold = TRUE)
+```
+
+Starting with the 2 state TOY model for shark 17 we clearly notice two depth profiles in figure S3. State 1 which is visited $42.9\%$ of the time is a intermediate and shallow level of water occupying about $0m-400m$. Looking at the parameters table 2 we see that the mean in state 1 is $291.17m$ with a narrow confidence interval $(290.15, 292.19)$. The standard deviation is $64.38m$ and with a confidence interval of $(63.68, 65.08)$. State 2 is visited $57.1\%$ of the time which is a majority of the time. The state is characterized by intermediate and deep levels of water spanning from approximately $400m-600m$. Again, looking at the parameters table we see that the mean in this state is at $433.76m$ with a confidence interval $(433.13, 434.38)$. The standard deviation is $43.79m$ and with a confidence interval of $(43.36, 44.20)$. Shark 17s initial distribution has approximately $1.0$ probability of being in state 1 at two significant figures which we would expect as the shark is tagged at the surface and state 1 accounts for shallow waters. Comparing the 2 states it is evident that state 1 which is occupied less is consisting of shallow and intermediate level of waters spanning widely. This explains the larger standard deviation. State 2 is of much deeper waters but a more concentrated distribution around the mean resulting in a lower standard deviation.
+
+Next, we proceed to consider the 3 state TOY model for shark 6 we see the depth profiles depicted in figure S4. State 1 which is visited a majority of the time at $62.2\%$ consists mostly of intermediate levels of water but also deeper levels of water ranging from about $250m-450m$. Upon examining the parameter table, we observe that the states mean is $344.29m$ with a confidence interval of $(343.42, 345.16)$. The standard deviation is quite low at $36.67m$ with a confidence interval of $(36.03, 37.30)$. Following state 1, the second most visited state at $23.5\%$ is state 2 which is characterized by the shallow to lower intermediate level of water which is about $0m-320m$. state 2's mean is $231.20$ with a confidence interval of $(228.71, 233.69)$. The standard deviation of state 2 is $80.47m$ with a confidence interval of $(78.75, 82.20)$. The larger standard deviation is because of the range of water being from shallow all the way to intermediate levels. Lastly, the least visited but non-negliable state is state 3 at $14.3\%$ and is characterized by deep waters ranging mostly from $400m-800m$ but with a few extreme dives of $800m-1200m$. State 3 has a mean of $623.30m$ with a larger but still reasonable confidence interval of $(616.87, 629.75)$. Lastly, the standard deviation for state 3 is $149.24$ also with a larger confidence band at $(145.27, 153.22)$. The deviation in state 3 is perfectly explained by the depths attributed to state 3 as we see some extreme dives in the deep waters but with a concentration around the mean. The initial distribution has a probability of $0.99$ at two significant figures of being in state 2. This makes perfect sense as well since the shark is tagged at the surface and state 2 accounts for shallow waters. Comparing the states it is evident that they split the water column up in somewhat 3 categories with some overlaps at the transitions.
+
+To summarize, the movement of shark 6 is much more extreme than shark 17. The younger shark 6 is more exploratory than the older shark 17. The exploration for shark 6 is quite interesting as it is both in the shallower water and the deepest of water recorded for the sharks. The sharks do have similarities in the fact that they occupy the same intermediate level of water the majority of the time.
+
+Given that the incorporation of the TOY is a periodic spline renders the regression parameter estimates non-interpretable. Consequently, we opt to evaluate the transition probabilities at specific temporal points within the year through graphical examination since the estimates are non-interpretable. Note that because of limitations of **`momentuHMM`** package that we were not able to monkey patch the months will be displayed as numbers. i.e January is month $1$ and December month $12$. These are now fixed in the newer package **`hmmTMB`**.
+
+The transition probabilities can be seen in figure 8 and 9 for shark 6 and 17, respectively. We plot the $95\%$ confidence bands using the **`plotCI`** logical indicator in the **`plot`**-command in **`momentuHMM`**. Note that the notation $i\to j$ for $i,j=1,2,3$ indicates a transition from state $i$ to state $j$.
+
+\setcounter{figure}{7}
+```{r, echo=FALSE, fig.cap= "Transition probabilities for 3 state TOY model for shark 6", out.width="100%", out.height="90%"}
+knitr::include_graphics("t6.png")
+```
+
+We remind that the water levels for shark 6 were shallow to intermediate (state 2), intermediate to deep (state 1) and deep (state 3). Firstly, it is noticeable that the probabilities are not constant over time which indicates a non-homogeneous underlying Markov chain as expected. Noticeably, the probability of $\gamma_{11}$ is falling slightly towards the the end of the year (September-November) indicating that intermediate bodies of water are not preferred going into the fall. $\gamma_{33}$ is decreasing from mid August where the summer slowly starts to end until the end of October where the probability of $\gamma_{33}$ increases. Interestingly, the probability of $\gamma_{22}$ increases as well doing October. This is also supported by the probability of $\gamma_{12}$ during the end of the year being a slightly higher probability than the rest of the year. This could indicate that extremes are preferred doing this time of year. However, it is extremely difficult to asses more from the plot.
+
+\newpage
+Finally, we consider the transition probabilities for the 2 state TOY model for shark 17 depicted in figure 9. We remind that state 1 is the shallow/intermediate depths and state 2 is the intermediate and deeper water.
+
+\setcounter{figure}{8}
+```{r, echo=FALSE, fig.cap= "Transition probabilities for 2 state TOY model for shark 17", out.width="100%", out.height="90%"}
+knitr::include_graphics("t17.png")
+```
+
+We notice that around the middle of August the probability of $\gamma_{22}$ is reduced slightly and the probability of $\gamma_{21}$ is increasing from mid August to October. However, there seems to be some deviation around mid August for the persistence of sticking in state 1 which is the end of summer and the start of fall. Beware of the fact that we do not have any winter data from shark 17 to compare with shark 6 and that shark 6 is missing late winter/early spring data as well.
+
+\newpage
+Assessing the precise effect of transition probabilities using transition probability plots poses a challenge in seeing the bigger picture of the movement behavior. To overcome this challenge, we will examine the stationary state probabilities and depict them for specific TOY values. By doing so, we can obtain the stationary distribution corresponding to the transition probabilities, offering insight into the probability of the shark being in a state for a given covariate value. When the TOY is held constant (for a fixed TOY) in the model, the underlying Markov chain becomes homogeneous. Since the Markov chain operates in discrete time and on a finite state-space, it is established in the Hidden Markov Model section of the thesis that the Markov chain possesses a unique and strictly positive stationary distribution. Consequently, we can determine and visualize the stationary distribution for the underlying Markov chain for any TOY using the **`plotStationary`**-command in **`momentuHMM`** and use the logical indicator **`plotCI`** to achieve the $95\%$ confidence interval bands. The figures can be seen below starting with figure 10 for shark 6 and figure 11 for shark 17.
+
+\setcounter{figure}{9}
+```{r, echo=FALSE, fig.cap= "Stationary state probabilities for TOY 3 state model for shark 6", out.width="100%", out.height="90%"}
+knitr::include_graphics("stationary6.png")
+```
+
+Describing the behavior of the distribution chronologically through the months we firstly notice a fall in stationary state probability for state 2 (shallow/intermediate) and state 3 (deep) with a rise for state 1 (intermediate/deep). This behavior of sitting comfortably in the middle of the body of water with high probability is consistent from May to July. From July to August the stationary state probability of state 1 declines and the probability of state 3 rises in correspondence. State 2 is still on a steady decline at this point in time. These factors suggest that the shark is now more willing to spend a larger amount of time in the deeper waters during the summer compared to the spring. A rather drastic change happens from the late summer, August, to the start of fall, September. The stationary state probability of state 1 begins to increase again and a simultaneous increase is seen in state 2. State 3 starts to decline rather quick indicating that the intermediate and shallow body of water is more attractive for the shark during this TOY. The search for shallower water increases drastically from this point to October/middle of fall seen by a steep increase in the stationary staate probability for state 2. The largest change in behavior now occurs at the start of October to November which is the start of winter/late fall and the end of our data. A rapid increase in the stationary state probability of state 3 occurs to almost $0.6$. State 1 is still steadily declining but slightly less steep. State 2 plummets rather quickly after having the largest stationary state probability. The described aspects of the stationary state behavior suggest that shark 6 is more likely to enter deep waters in the end of fall/start of winter compared to the rest of the TOY data present.
+
+\setcounter{figure}{10}
+```{r, echo=FALSE, fig.cap= "Stationary state probabilities for TOY 2 state model for shark 17", out.width="100%", out.height="90%"}
+knitr::include_graphics("stationary17.png")
+```
+
+The same method of analysis will be used for shark 17. From the middle of the summer to the end of summer, which would be start July to Mid august, we notice a rather stale pattern. State 1, which is the shallow to intermediate body of water is very unlikely to be visited by shark 17. We notice a slight deviance where state 1 is more likely in the middle of July which slowly decreases back down. The stationary state probability is approximately between $0.1$ to $0.2$ in this period. State 2 which is the intermediate to deeper body of water nearly has a stationary state probability of approximately $0.8$ to $0.9$ from July to mid August with a slight fall in the middle of July. This fall in stationary state probability dissipates quite quickly. From the end of summer to the mid of fall, which is mid August to October, we observe a rather drastic change in behavior. The stationary state probabilities undergoes a complete reversal with a surge in the state 1 stationary state probability and a corresponding decrease in state 2 stationary state probability. This abrupt shift continues to the middle of September which is the start of fall. From this point forwards the probabilities stagnate at approximately $0.95$ for state 1 and $0.05$ for state 2. Summarizing, shark 17 prefers to stay in deep to intermediate waters during most of the summer until the end of summer/start of fall. From the end of summer/start of fall until the middle of fall the preferred depth is shallow to intermediate levels of water. We can not assess the rest of the year because of unrecorded months. 
+
+To compare the results; During the transition from late summer to early fall, we observe a drastic and simultaneous change in behavior among the sharks. Prior to this period, both sharks generally exhibited a preference for intermediate to deeper water levels. However, from the onset of fall until the middle of the season, their preference shift towards shallower to intermediate water levels. This shift is evident through a sharp rise in the stationary state probability of state 2 for shark 6 and a similar increase in the stationary state probability of state 1 for shark 17. Subsequently, from this point onwards until the end of fall, we observed a remarkably steep increase in the stationary state probability of state 3 for shark 6, indicating a greater affinity for deeper depths.
+
+\newpage
+Lastly we present the results of our model on the previously shown Depth vs. time plot to see the model applied in figure 12. Starting with shark 6 it is apparent that state 2 is indeed the shallower waters into the intermediate body of water. The intermediate body of water is then mostly assigned to state 1 and finally deep depths are assigned to state 3. The TOY effect is seen to drastically change around august and again during the fall as seen in the analysis of the stationary state probabilities for fixed times. The intermediate and shallow waters are seen more predominant from September to October by state 2. State 3 is more predominant in the late fall as the stationary state probabilities suggested.
+ 
+\setcounter{figure}{11}
+```{r, echo=FALSE, fig.cap= "Depth vs. time coloured by most likely state sequence for TOY 3 state model for shark 6", out.width="100%", out.height="90%"}
+knitr::include_graphics("6present.png")
+```
+
+\newpage
+For shark 17 we plot both the most likely state sequence and the depths vs. time colored by state probabilities in figure 13. On the right plot, it is evident that state 1 is mainly intermediate but also shallow levels of depth. State 2 is deeper depths with intermediate levels of depth as well. The left plot which is the state probability plot shows the separated states by probability. The summer period consists mostly of state 2 depths which is the state consisting of deeper depths. We clearly see transit areas at depths of approximately $375m$ in the summer period that mostly disperse by the end of August. These transit depths are seen to be varying a lot in state probability around the $375m$ mark. As the stationary state probabilities also suggested we notice a swap to shallower and intermediate levels of water during the fall months and deeper waters during the winter. Comparatively, the same depth profile is observed from July to October as shark 6.
+
+```{r, echo=FALSE, fig.show='hold'}
+knitr::asis_output("\\begin{minipage}{\\textwidth}\n\\hspace{-2cm}\n\\includegraphics[width=8in, height=20in]{17present.png}\n\\end{minipage}")
+```
+\begin{center}
+Figure 13: Depth vs. time colored by state probability (left) and coloured by most likely state sequence (right) for TOY 2 state model for shark 17
+\end{center}
+\setcounter{figure}{14}
+
+\newpage
+# **Discussion**
+When choosing the number of states we argued that the frequentist fitting should not be based on the fitting a posteriori based on [@michelot2022movehmm, p. 4]. Furthermore, we argued that the AIC should dictate a majority of the decisions made from this point but not solely be the driving force behind the choice of state. From table 1 we easily saw that every single 3 state model for every single shark had the best AIC by a large shot according to [@burnham2004multimodel p.270-272] and [@burnham2011aic]. Furthermore, we advocated for choosing a number of states around the $2$ mark based on [@beyer2013effectiveness] because of the lack of biological interpretation. As [@michelot2022movehmm, p. 4] explains we need to use the biological theory to assign numbers of states. These aspects combined hindered the analysis for a majority of reasons. Starting with the biological theory; very little is known about the Greenland shark and its movement. To further exacerbate the complications the shark is quite unique which is why it initially sparked attention. We based the number of states to fit $(2-3)$ solely on analysis on previous marine animal studies where the range of states usually is $2-4$.
+
+This method of number of state selection prior to fitting slightly contradicts our proposed solution for model selection as the underlying biological theory did not dictate the number of state. However, we have little to no biological theory on the number of possible states of a Greenland shark other than the fact that it is a arctic fish.
+We now consider the state selection after the fitting. We chose the best model based on AIC which turned out to be 3 state TOY for every shark. However, when separating the states in the 3 state models and plotting the seperated histograms with the depths attributed to the state-dependent distribution we saw obvious indicators of overfitting. The issue of overfitting was known prior to fitting based on [@van2016overfitting, p. 2] and caused the most issues out of any for model selection and consequently the results. Using figure S3 and S4 where we separated the states it did seem like the right calls were made. The 3 state TOY model for shark 17 was quite interesting as the 2 states from the 2 state model were somewhat preserved but a new state arrived with extreme depth measurements in both ends of the spectrum. This state (1) could potentially have been a transit state as the measurements of depths were surrounding the more visited states (2 and 3). This could either be a case of overfitting or an actual true state suggesting that shark 17 has one or more transit states around the extremes. To explore this issue a four state model could potentially be fit for comparison [@van2016overfitting, p. 2] but for our purpose of movement exploration the two state model was a better fit. However, another issue arose with shark 6. When we examined the two state model for shark 6 we saw that state two was ranging all the way from $0m$ to depths of $1200m$ whilst the major state 1 was ranging from about $200m$ to $400m$. This model would have been impossible to interpret as an increase in state 2 probability could mean that the shark was more likely to be anywhere on the depth spectrum. When the 3 state TOY model was considered instead this issue was resolved nicely and the state-dependent distributions had a better fit, although still not great. The state-assigned depths became readily interpretable as the body of water became segmented into three somewhat distinct size categories. This phenomena seemed like a case of 'underfitting' as opposed to overfitting. However, this method was largely based on 'eyeballing' and some state-mean relations to check for interpretability.
+
+The issue of interpretability leads me to the response variable, depth. Due to the limited availability of data, particularly pertaining to depth as the only response variable, it proved challenging to provide a precise biological interpretation of the states. Consequently, the states were broadly categorized as representing either shallow to intermediate depths or intermediate to deep depths. As a result, it was not possible to establish definitive behavioral traits of the Greenland shark, but rather discern swimming patterns relative to the time of year. Enhancements to the analysis could be achieved by incorporating location data, measuring horizontal swimming movements, or employing other indicators of activity such as acceleration, speed, or turning angles. These additional measures could assist in assigning specific behaviors to the states, such as resting or foraging, which were intentionally left unspecified/unnamed. This is largely the reason why most of the models were not considered fit for use. A mode with a state containing both shallow waters and extreme depths were impossible to interpret. If we however had some other response variable to characterize the state, i.e low speeds, large turning angles etc. the models could have been considered. Unfortunately, the necessary data, including information on overlapping swimming patterns, potential prey species of the Greenland shark, identification of foraging and resting states and indicators of stomach temperatures for assessing food consumption, were not available for analysis. Consequently, our analysis relied solely on depth and swimming patterns, without attributing specific characteristics to these states beyond water levels. One could argue that the depth increments (;the vertical velocity) or the decent rate (;normalizing increments by $\Delta t$) could be used as a measure for activity. However, this now assumes that all activity has to happen in the water column as opposed to horizontal movements between different water columns or turning angles in the water column. However, this would have raised computational power substantially and we do not think it is a valid response variable to consider the vertical velocity alone. If we had the actual velocity or absolute value of the velocity (the speed) it would have been a great addition to the analysis for state characterization.
+
+We mentioned that there might be a longer memory in the data that is not captured and we would have to either increase the number of states or let new covariates enter [@michelot2022hmmtmb, p. 13]. One could argue vaguely that increasing the number of state for shark 17 might give interpretable results but this is merely based on the fact that state 1 in the 3 state model seems to indicate extremes of the spectrum. Generally speaking, it does not seem to be the case that the number of states was the complication. New covariates or rather models including both TOD and TOY could potentially have solved some of the autocorrelation and model fit. Covariates relating to the thesis' proposed subject were however included, namely, TOD and TOY. The TOY model did give us a somewhat coherent conclusion for the months at hand even though there was issues with the pseudo-residuals and ACF.
+
+Inclusion of shark 30 into the analysis was declined on the basis that the models did not converge even though the model fit was great with only a slight light right tail. Presentation of shark 30 was possible because of the rather great fit but we decided to go with a 2 and 3 state model that actually converged for comparability and lack of repetition. Shark 6 and 17 both displayed extremely bad pseudo-residuals with a really light left tail and a somewhat light right tail. As such, conclusions drawn from the model have to be taken with caution. The ACF plots revealed a clear trend indicating that the model failed to capture a substantial portion of the autocorrelation present in the data for every shark; Successive depths within each state were not independent which means that the memory within the chain is not long enough to counteract the one induced by the hidden process. Feedback mechanism could have been considered by introducing transition probabilities that depend on the history, however, we are lacking such covariates suitable for such model fit. One could have used time since last deep dive but as the Greenland shark is indeed a fish behavioral traits using deep dives were not considered as it does not need to escape the water surface to breath. However, a solution to include a feedback mechanism might have been possible but was beyond the scope and computational power of this thesis.
+
+Nonetheless, we are only dealing with 2 shark models which is a rather small quantity to generalize the conclusion.  Shark 6 and 17 which were the only sharks reported on were also both tagged in the same area in Greenland which narrows the analysis further. Furthermore, TOY data not being all year around and not including multiple years further weakens the conclusion. This is the advantage of the TOD covariate but we decided to go with the better AIC model. Keeping these considerations in mind we are pleased that the sharks were exhibiting similar movements according to the models even though their depth distributions are quite distinct.
+
+Onto the technical aspect; computational power problems. Fitting only the three chosen models (2 state TOY for shark 17 and 30, 3 state TOY for shark 6) took approximately $2.5$ hours with six dedicated cores (Intel(R) Core(TM) $\text{i}5-9600$K CPU @ $3.70$GHz, $3696$ Mhz, $6$ cores, $6$ logical processors). The method used to measure run time was the **`Sys.time()`**-command in R where start and end time was recorded before running and after running the model fitting. Fitting models became increasingly draining on the used system and progressing through the thesis while fitting was not possible. We wanted to fit a model where both TOD and TOY entered the model on the transition probabilities using periodic splines but the run time was too long for even one model. The run time is unknown as the fit was not done after approximately four hours. Guessing, the model where both covariates entered would have increased AIC as both models individually increased AIC substantially.
+
+We mentioned that if location data exhibit temporal irregularities or are affected by measurement errors, then they cannot be utilized for conventional maximum-likelihood hidden Markov model analyses that rely on the forward algorithm [@mcclintock2021momentuhmm, p. 23]. Fortunately, the data is only exhibiting temporal regularities but measurement erros might have been at play. When exploring the data for shark 6 some measurements for depth were almost $30\%$ larger or smaller for one tag compared to the other tag for the same time recording. This could potentially have cluttered the model fitting but there is no way to know for certain if this is the case but it is relevant to keep in mind. For this reason we chose to only consider data from one tag as opposed to combining the data sets for more data at hand as behavior of shark 6 could quickly look more erratic than it actually was because of sudden missing data from one tag getting replaced by data from another tag that records at a larger or lower error compared to the first tag. However, even though we did not combine data sets because of differences between tags this does not solve the issue that one (or both) tags might be highly inaccurate but it does probably reduce the risk of error.
+
+\newpage
+# **References**
+::: {#refs}
+:::
+
+\newpage
+# Supplementary material {-}
+
+\beginsupplement
+# Code {.unlisted .unnumbered}
+[The code for data, monkey patches, fittings, figures, tables and plots will be uploaded to this GitHub link as soon as possible. A monkey patched version of the plot function to use options from the **`momentuHMM`**-package will also be avaliable.](https://github.com/YoussefRaad-mathecon?tab=repositories)
+```{r, echo=FALSE, fig.cap= "Northwest Greendland tagging map.", out.width="80%", out.height="90%"}
+knitr::include_graphics("Fig. 1_NW Greenland_Tagging map.png")
+```
+
+```{r, echo=FALSE, fig.cap= "Southeast Greenland tagging map.", out.width="100%", out.height="90%"}
+knitr::include_graphics("Fig. 2_SW SE Greenland_tagging map.png")
+```
+
+\newpage
+```{r, echo=FALSE, fig.cap="Decoded state distributions for both 2 and 3 states of the TOY model", fig.show='hold'}
+
+knitr::asis_output("\\begin{minipage}{\\textwidth}\n\\hspace{-2cm}\n\\includegraphics[width=8in]{combined2statestrat.png}\n\\end{minipage}")
+```
+\begin{center}
+Figure S3: Seperated depth histograms for each state-dependent distribution and its depth for every shark for the 2 state TOY model. The rows represent each shark.
+\end{center}
+
+\newpage
+```{r, echo=FALSE, fig.cap="Decoded state distributions for both 2 and 3 states of the TOY model", fig.show='hold'}
+
+knitr::asis_output("\\begin{minipage}{\\textwidth}\n\\hspace{-2cm}\n\\includegraphics[width=8in]{combined3statestrat.png}\n\\end{minipage}")
+```
+\begin{center}
+Figure S4: stratified depth histograms for each state-dependent distribution and its depth for every shark for the 3 state TOY model. The rows represent each shark.
+\end{center}
+
+\newpage
+```{r, echo=FALSE, fig.width=17, fig.height=22}
+# Plot the density of "Depth" for each month using facet_wrap
+d1<-ggplot(df6, aes(x = Depth)) +
+  geom_density(fill = "blue") +
+  facet_wrap(~ month(time), nrow = 3) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ggtitle("Shark 6")+ theme(plot.title = element_text(face = "bold")) 
+# Plot the density of "Depth" for each month using facet_wrap
+d2<-ggplot(df17, aes(x = Depth)) +
+  geom_density(fill = "blue") +
+  facet_wrap(~ month(time), nrow = 3) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ggtitle("Shark 17")+ theme(plot.title = element_text(face = "bold")) 
+# Plot the density of "Depth" for each month using facet_wrap
+d3<-ggplot(df30, aes(x = Depth)) +
+  geom_density(fill = "blue") +
+  facet_wrap(~ month(time), nrow = 3) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ggtitle("Shark 30") + theme(plot.title = element_text(face = "bold")) 
+grid.arrange(d1, d2, d3, nrow = 3)
+```
+\begin{center}
+Figure S5: Month stratified depth densities for every shark
+\end{center}
+
+\newpage
+```{r, echo=FALSE, out.width="100%", out.height="90%"}
+knitr::include_graphics("stationary30.png")
+```
+\begin{center}
+Figure S6: Stationary state probabilities for 2 state TOY model for shark 30
+\end{center}
+
+\newpage
+```{r, echo=FALSE, out.width="100%", out.height="90%"}
+knitr::include_graphics("30present.png")
+```
+\begin{center}
+Figure S7: Depth vs. time colored by state probability (top) and colored by most likely state sequence (bottom) for TOY 2 state model for shark 30
+\end{center}
+
+
+
+
